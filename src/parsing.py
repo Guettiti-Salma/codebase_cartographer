@@ -107,4 +107,21 @@ def resolve_import(importer_path: str, imported: str, repo_root: str, all_files:
     if parent_path in all_files:
         return parent_path
 
+    # --- package import: "import schedule" where schedule/ is a package (has __init__.py) ---
+    # extremely common — any "import <package>" for a package rather than a single module
+    # needs this check, or it silently fails to resolve every time
+    package_init = os.path.join(imported.replace(".", os.sep), "__init__.py")
+    if package_init in all_files:
+        return package_init
+
+    # --- src-layout fallback: package lives under src/, e.g. src/myapp/helpers.py ---
+    # ("src layout" is a common Python packaging convention used by setuptools templates,
+    # PyPA's own sample project, and plenty of real-world packages)
+    src_as_path = os.path.join("src", as_path)
+    if src_as_path in all_files:
+        return src_as_path
+    src_package_init = os.path.join("src", imported.replace(".", os.sep), "__init__.py")
+    if src_package_init in all_files:
+        return src_package_init
+
     return None                                                 # probably a third-party or stdlib import

@@ -5,11 +5,13 @@ Codebase Cartographer — CLI entry point.
 
 Usage:
     python main.py https://github.com/<user>/<repo>
+    python main.py examples/tiny_repo          # or any local folder — skips git, minimal API usage
 
 Requires a GOOGLE_API_KEY in a .env file (see .env.example) — get a free
 one at https://aistudio.google.com/apikey
 """
 
+import os                                                       # path normalization for local-folder input
 import sys                                                     # to read the repo URL from the command line
 import uuid                                                     # to generate a unique thread_id per run
 from dotenv import load_dotenv                                  # loads GOOGLE_API_KEY from .env into the environment
@@ -24,10 +26,26 @@ from src.render import render_mermaid_to_png, mermaid_cli_available  # optional 
 
 def main():
     if len(sys.argv) < 2:                                         # user forgot to pass a repo URL
-        print("Usage: python main.py <github-repo-url>")
+        print("Usage: python main.py <github-repo-url-or-local-folder>")
         sys.exit(1)
 
-    repo_url = sys.argv[1]                                         # e.g. "https://github.com/psf/requests"
+    # normalize the raw argument before anything else touches it:
+    #  - .strip() removes trailing newlines/spaces from a pasted path
+    #  - .strip('"\'') removes wrapping quotes — Windows Explorer's "Copy as path"
+    #    wraps paths in double quotes, which would otherwise make os.path.isdir()
+    #    return False even for a perfectly real folder
+    #  - os.path.expanduser() turns "~/projects/foo" into an actual absolute path
+    repo_url = os.path.expanduser(sys.argv[1].strip().strip('"').strip("'"))
+
+    # fail fast with a clear message if this is neither a real local folder nor
+    # something that looks like a git URL — better than a cryptic git error later
+    looks_like_url = repo_url.startswith(("http://", "https://", "git@"))
+    if not os.path.isdir(repo_url) and not looks_like_url:
+        print(f"'{repo_url}' isn't a folder that exists on this machine, and it")
+        print("doesn't look like a git URL (expected it to start with https:// or git@).")
+        print("Usage: python main.py <github-repo-url-or-local-folder>")
+        sys.exit(1)
+
     app = build_graph()                                             # compile the graph once, reuse for this run
 
     print("Codebase Cartographer")                                  # small banner — purely cosmetic

@@ -74,13 +74,32 @@ python -m src.qa <vectorstore_dir> "What handles authentication?"
 ```
 pip install -r requirements.txt
 cp .env.example .env        # then paste in a free key from https://aistudio.google.com/apikey
-python main.py https://github.com/<user>/<small-repo>
+
+python main.py examples/tiny_repo               # try this FIRST — 2 files, ~2 embedding requests total
+python main.py https://github.com/<user>/<repo>  # once that works, point it at a real repo
 ```
+
+`examples/tiny_repo` is a 2-file fixture shipped with the project
+specifically for this: confirming your API key and setup work with the
+smallest possible footprint against Gemini's free-tier rate limit (100
+embed requests/minute) before spending any quota on a real repo. Passing
+a local folder instead of a URL skips `git clone` entirely — `clone_repo_node`
+detects it with a plain `os.path.isdir` check.
 
 Start with a small repo the first time — indexing and per-file
 summarization both cost API calls, and `max_summarize` in `main.py` caps
 how many files get an LLM-written summary (default 15) to keep a first run
 fast and cheap.
+
+**A correction from earlier in this project's own history**: Gemini's free
+tier caps `embed_content` at **100 requests per minute** — a tighter limit
+than the token-based figure mentioned earlier on, and the one that actually
+matters here since chunking produces one request per chunk. `chunk_and_index`
+now retries automatically on a 429 (`src/indexing.py`, `_embed_with_retry`),
+reading the server's suggested wait time and sleeping it out — but if you're
+testing repeatedly against the same repo in a short window (very normal
+while debugging), you can still exhaust the full budget across runs, since
+there's no caching between runs yet (see "Honest limitations" below).
 
 ### Optional: rendering an actual PNG
 
@@ -127,19 +146,3 @@ src/qa.py                     free-form RAG Q&A over the persisted vector store
 test_pipeline.py                integration test, no API key required
 ```
 
-## Honest limitations / natural next steps
-
-- Import resolution is regex-based, not a real parser — it will miss
-  dynamic imports (`importlib.import_module(some_variable)`) and doesn't
-  understand more complex module resolution (namespace packages, path
-  rewriting via build tools).
-- Only Python and JS/TS are supported; adding a language means adding a
-  regex pair in `parsing.py` and a `Language` mapping in `indexing.py`.
-- No caching between runs — re-analyzing the same repo re-clones and
-  re-embeds everything. A production version would key the vector store by
-  the repo's latest commit hash and skip re-indexing unchanged commits.
-- **The evaluation angle worth adding**: hand-label 5–10 real repos with
-  their true entry points and dependency depth, then score this pipeline's
-  output against that set. That turns "it works on my demo repo" into a
-  measured accuracy number — the difference between a demo and something
-  you can defend in an interview.

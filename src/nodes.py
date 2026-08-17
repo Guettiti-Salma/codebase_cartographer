@@ -24,8 +24,14 @@ from .llm import chat_complete
 # ============================================================
 
 def clone_repo_node(state: RepoState) -> dict:
-    local_path = _clone_repo(state["repo_url"])                  # shell out to `git clone`
-    return {"local_path": local_path}                             # only report what this node changed
+    repo_url = state["repo_url"]
+    if os.path.isdir(repo_url):                                    # a local folder was passed instead of a URL —
+        return {"local_path": repo_url}                             # use it directly, skip git entirely. This is
+                                                                      # what lets examples/tiny_repo (or any local
+                                                                      # project) be analyzed with zero network calls
+                                                                      # and the smallest possible embedding volume.
+    local_path = _clone_repo(repo_url)                               # otherwise, shell out to `git clone` as normal
+    return {"local_path": local_path}                                # only report what this node changed
 
 
 def chunk_and_index_node(state: RepoState) -> dict:
@@ -76,7 +82,8 @@ def trace_step_node(state: RepoState) -> dict:
         resolved = resolve_import(current, raw_import, state["local_path"], all_files_set)
         if resolved is None:
             continue                                                   # third-party/stdlib import — not our concern
-        edges.append((current, resolved))                              # record this dependency
+        if (current, resolved) not in edges:                            # a file can import the same dependency
+            edges.append((current, resolved))                           # via multiple statements — record it once
         if resolved not in visited and resolved not in frontier:       # avoid duplicate work and infinite loops
             frontier.append(resolved)                                  # queue it for a FUTURE trace_step call
 
