@@ -5,20 +5,16 @@ Codebase Cartographer — CLI entry point.
 
 Usage:
     python main.py https://github.com/<user>/<repo>
-    python main.py examples/tiny_repo          # or any local folder — skips git, minimal API usage
+    python main.py examples/tiny_repo          # or any local folder — skips git
 
-Requires a GOOGLE_API_KEY in a .env file (see .env.example) — get a free
-one at https://aistudio.google.com/apikey
+Runs fully locally — no API key needed. Requires:
+  - Ollama running locally with the chat model pulled: `ollama pull qwen2.5-coder:3b`
+  - (embeddings download automatically on first use — see src/llm.py)
 """
 
 import os                                                       # path normalization for local-folder input
 import sys                                                     # to read the repo URL from the command line
 import uuid                                                     # to generate a unique thread_id per run
-from dotenv import load_dotenv                                  # loads GOOGLE_API_KEY from .env into the environment
-
-load_dotenv()                                                    # MUST run before importing src.graph, which
-                                                                  # imports src.llm, which reads the API key at
-                                                                  # client-construction time
 
 from src.graph import build_graph                                # our compiled LangGraph app
 from src.render import render_mermaid_to_png, mermaid_cli_available  # optional Mermaid -> PNG step
@@ -72,9 +68,9 @@ def main():
     print("\n--- Writeup ---\n")
     print(final_state["writeup"])
 
-    with open("architecture.mmd", "w") as f:                         # save the diagram on its own, ready to paste
+    with open("architecture.mmd", "w", encoding="utf-8") as f:        # save the diagram on its own, ready to paste
         f.write(final_state["diagram_code"])                          # into any Mermaid-aware renderer
-    with open("architecture.md", "w") as f:                           # save the writeup on its own, ready for a README
+    with open("architecture.md", "w", encoding="utf-8") as f:          # save the writeup on its own, ready for a README
         f.write(final_state["writeup"])
 
     print("\nSaved architecture.mmd and architecture.md")

@@ -3,7 +3,7 @@ qa.py
 -----
 The genuine "ask a question, get a RAG-grounded answer" feature: embed
 the question, similarity-search the Chroma store that chunk_and_index
-built, and ask Gemini to answer using ONLY the retrieved chunks.
+built, and ask the local LLM to answer using ONLY the retrieved chunks.
 
 This is deliberately kept separate from the main graph: the diagram
 pipeline needs a fixed, deterministic set of files traced (structural
@@ -15,8 +15,6 @@ Usage:
 """
 
 import sys                                                    # to read command-line arguments
-from dotenv import load_dotenv                                 # loads GOOGLE_API_KEY from a .env file
-load_dotenv()                                                   # must run before importing anything that reads env vars
 
 from langchain_chroma import Chroma                             # to re-open the persisted vector store
 from .llm import get_embeddings, chat_complete                   # reuse the exact same wrappers as the main pipeline

@@ -3,9 +3,10 @@ indexing.py
 -----------
 Everything involved in turning a cloned repo into a searchable vector
 store: walking the file tree, chunking each file with a language-aware
-splitter, embedding the chunks with Gemini, and persisting them to a
-local Chroma database. This IS the "RAG" part of the project — chunks
-+ embeddings + vector database, exactly as advertised.
+splitter, embedding the chunks locally (HuggingFace/sentence-transformers,
+see llm.py), and persisting them to a local Chroma database. This IS the
+"RAG" part of the project — chunks + embeddings + vector database, exactly
+as advertised.
 """
 
 import os          # filesystem walking and path joins
@@ -17,7 +18,7 @@ from langchain_core.documents import Document   # the (text + metadata) unit Lan
 from langchain_chroma import Chroma              # the vector store wrapper
 
 from .parsing import SKIP_DIRS, detect_language  # reuse the same language/skip rules everywhere
-from .llm import get_embeddings                  # our Gemini embeddings wrapper
+from .llm import get_embeddings                  # our local embeddings wrapper
 
 
 def clone_repo(repo_url: str) -> str:
@@ -68,13 +69,12 @@ def chunk_and_index(repo_root: str, persist_dir: str):
         language = detect_language(rel_path)                                # e.g. "python"
         lc_language = LC_LANGUAGE.get(language)                             # the matching LangChain enum value
 
-        # from_language() tries to break chunks on function/class boundaries
-        # before falling back to plain newlines — this is the "chunking" half of RAG.
-        # chunk_size is deliberately on the larger side (2500, not a "textbook" ~500-1000):
-        # every chunk costs one embedding request against Gemini's free tier, which caps at
-        # 100 requests/minute — bigger chunks mean fewer requests for the same amount of code.
+        # from_language() tries to break chunks on function/class boundaries before
+        # falling back to plain newlines — this is the "chunking" half of RAG.
+        # Sized for retrieval quality (not request-count economy — that concern went
+        # away when embeddings moved local; see get_embeddings() in llm.py).
         splitter = RecursiveCharacterTextSplitter.from_language(
-            language=lc_language, chunk_size=2500, chunk_overlap=150
+            language=lc_language, chunk_size=1200, chunk_overlap=150
         )
         chunks = splitter.split_text(content)                               # list[str], one entry per chunk
 
@@ -91,45 +91,8 @@ def chunk_and_index(repo_root: str, persist_dir: str):
     # Chroma.from_documents does two things at once: embeds every chunk via
     # the embeddings object we pass in, and writes the result to disk at
     # persist_directory — this is the "embedding + vector database" half.
-    # Wrapped in retry logic below because this is the single call most likely
-    # to hit Gemini's free-tier rate limit on anything but a tiny repo.
-    _embed_with_retry(all_docs, get_embeddings(), persist_dir)
+    # No retry wrapper needed here: get_embeddings() runs the model locally,
+    # so there's no API quota to exhaust and no 429 to catch.
+    Chroma.from_documents(documents=all_docs, embedding=get_embeddings(), persist_directory=persist_dir)
 
     return len(all_docs), all_docs                                          # caller wants the count + the raw docs
-
-
-def _embed_with_retry(documents, embedding, persist_dir, max_retries=4, default_wait=65):
-    """
-    Gemini's free tier caps embed_content at 100 requests PER MINUTE. The
-    Google SDK already retries a failed request a few times internally
-    (via tenacity, a few seconds apart) — that's enough for a blip, but
-    nowhere near enough for a per-MINUTE cap, so a 429 still reaches us.
-    This catches specifically that case and waits out the quota window
-    instead of crashing the whole run.
-    """
-    import re    # only needed here, to parse the server's suggested wait time
-    import time  # to actually sleep between attempts
-
-    for attempt in range(1, max_retries + 1):                                # 1-indexed, easier to read in logs
-        try:
-            return Chroma.from_documents(
-                documents=documents, embedding=embedding, persist_directory=persist_dir
-            )
-        except Exception as error:
-            message = str(error)
-            is_rate_limit = "RESOURCE_EXHAUSTED" in message or "429" in message
-            if not is_rate_limit:
-                raise                                                        # a real bug shouldn't be retried silently
-
-            if attempt == max_retries:
-                raise                                                        # out of attempts — let it surface for real
-
-            # Gemini's error body usually includes "Please retry in 24.9s" — use that
-            # exact figure plus a small safety buffer when we can parse it, otherwise
-            # fall back to a conservative wait, since the cap resets on a rolling minute
-            match = re.search(r"retry in ([\d.]+)s", message, re.IGNORECASE)
-            wait_seconds = float(match.group(1)) + 5 if match else default_wait
-
-            print(f"Hit Gemini's free-tier rate limit (attempt {attempt}/{max_retries}). "
-                  f"Waiting {wait_seconds:.0f}s for the quota window to reset...")
-            time.sleep(wait_seconds)

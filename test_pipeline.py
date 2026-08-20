@@ -3,9 +3,9 @@ test_pipeline.py
 -----------------
 Runs the REAL graph (real chunking, real regex import tracing, real
 LangGraph loops) against a small synthetic repo, but monkeypatches the
-two functions that would otherwise call the Gemini API — proving the
-control flow (both loops, the retry-then-fallback path) is correct
-without needing a GOOGLE_API_KEY or network access.
+chat-completion calls that would otherwise hit a real (local) Ollama
+server — proving the control flow (both loops, the retry-then-fallback
+path) is correct without needing Ollama running or network access.
 """
 
 import os
@@ -20,19 +20,19 @@ from src.graph import build_graph
 def make_synthetic_repo():
     """Three python files with a real import chain: main -> utils -> helpers."""
     root = tempfile.mkdtemp(prefix="synthetic-repo-")
-    with open(os.path.join(root, "main.py"), "w") as f:
+    with open(os.path.join(root, "main.py"), "w", encoding="utf-8") as f:
         f.write(
             "from utils import do_thing\n"
             "if __name__ == '__main__':\n"
             "    do_thing()\n"
         )
-    with open(os.path.join(root, "utils.py"), "w") as f:
+    with open(os.path.join(root, "utils.py"), "w", encoding="utf-8") as f:
         f.write(
             "from helpers import support\n"
             "def do_thing():\n"
             "    return support()\n"
         )
-    with open(os.path.join(root, "helpers.py"), "w") as f:
+    with open(os.path.join(root, "helpers.py"), "w", encoding="utf-8") as f:
         f.write(
             "def support():\n"
             "    return 42\n"
@@ -47,7 +47,7 @@ def test_happy_path_and_retry_loop():
     indexing_module.clone_repo = lambda url: repo_root
     nodes_module._clone_repo = lambda url: repo_root
 
-    # --- monkeypatch indexing: skip real Gemini embeddings, fake a chunk count ---
+    # --- monkeypatch indexing: skip real (local) embeddings, fake a chunk count ---
     def fake_chunk_and_index(local_path, persist_dir):
         return (3, [])
     indexing_module.chunk_and_index = fake_chunk_and_index
@@ -56,7 +56,7 @@ def test_happy_path_and_retry_loop():
     # --- monkeypatch chat_complete: deterministic fakes, no API key needed ---
     call_log = {"generate_diagram_calls": 0}
 
-    def fake_chat_complete(prompt, model_name="gemini-2.5-flash"):
+    def fake_chat_complete(prompt, model_name="qwen2.5-coder:3b"):
         # NOTE: match on the exact instruction text generate_diagram_node uses, not just the
         # word "Mermaid" — the writeup prompt also mentions "Mermaid diagram" in passing, and
         # an earlier version of this test's substring check accidentally caught that call too.
@@ -111,7 +111,7 @@ def test_fallback_when_all_retries_fail():
         return (3, [])
     nodes_module._chunk_and_index = fake_chunk_and_index
 
-    def always_broken_chat_complete(prompt, model_name="gemini-2.5-flash"):
+    def always_broken_chat_complete(prompt, model_name="qwen2.5-coder:3b"):
         if "Write a Mermaid flowchart" in prompt:
             return "not mermaid, ever"                            # ALWAYS fails validation
         if "one plain sentence" in prompt:

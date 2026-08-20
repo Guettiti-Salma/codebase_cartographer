@@ -109,8 +109,7 @@ def summarize_modules_node(state: RepoState) -> dict:
         except OSError:
             continue
         prompt = f"In one plain sentence, what does this file do?\n\n{snippet}"
-        # flash-lite: this runs once per file, so we want the cheapest/fastest model that can handle it
-        summaries[file_path] = chat_complete(prompt, model_name="gemini-2.5-flash-lite")
+        summaries[file_path] = chat_complete(prompt)     # uses the default local model (see llm.py)
     return {"module_summaries": summaries}
 
 
@@ -139,7 +138,7 @@ def generate_diagram_node(state: RepoState) -> dict:
         "Output ONLY the Mermaid code — no markdown fences, no explanation.\n\n"
         f"Dependencies:\n{edge_text}\n\nFile summaries:\n{summary_text}\n{retry_note}"
     )
-    diagram = chat_complete(prompt, model_name="gemini-2.5-flash")
+    diagram = chat_complete(prompt)
     return {
         "diagram_code": diagram,
         "diagram_retry_count": state["diagram_retry_count"] + 1,          # count this attempt toward the cap
@@ -220,5 +219,5 @@ def generate_writeup_node(state: RepoState) -> dict:
         "Explain what the project does, how the main pieces connect, and where a new "
         "contributor should start reading."
     )
-    writeup = chat_complete(prompt, model_name="gemini-2.5-flash")
+    writeup = chat_complete(prompt)
     return {"writeup": writeup}

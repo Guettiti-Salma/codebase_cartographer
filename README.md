@@ -51,8 +51,9 @@ back to itself via a conditional edge), not hidden Python `while` loops:
 ## Where RAG is actually used (and where it deliberately isn't)
 
 - **`chunk_and_index`** is genuine RAG: every source file is split with a
-  language-aware chunker, embedded with Gemini, and persisted to a local
-  Chroma vector store.
+  language-aware chunker, embedded **locally** (HuggingFace/sentence-transformers
+  — see `src/llm.py`), and persisted to a local Chroma vector store. No API
+  call happens during indexing.
 - **Entry-point detection and import tracing are NOT RAG** — they're
   regex/structural checks (`src/parsing.py`). This is a deliberate choice:
   "which file does `main.py` import" is a deterministic question with one
@@ -71,35 +72,44 @@ python -m src.qa <vectorstore_dir> "What handles authentication?"
 
 ## Setup
 
-```
-pip install -r requirements.txt
-cp .env.example .env        # then paste in a free key from https://aistudio.google.com/apikey
+Runs **fully locally** — no API key, no `.env` file, no cloud dependency at all.
 
-python main.py examples/tiny_repo               # try this FIRST — 2 files, ~2 embedding requests total
+```
+# 1. install Ollama and pull the chat model (one-time, needs internet)
+#    https://ollama.com/download
+ollama pull qwen2.5-coder:3b
+
+# 2. install Python dependencies
+pip install -r requirements.txt
+
+# 3. run it — embeddings download automatically on first use (~130MB, one-time)
+python main.py examples/tiny_repo               # try this FIRST
 python main.py https://github.com/<user>/<repo>  # once that works, point it at a real repo
 ```
 
-`examples/tiny_repo` is a 2-file fixture shipped with the project
-specifically for this: confirming your API key and setup work with the
-smallest possible footprint against Gemini's free-tier rate limit (100
-embed requests/minute) before spending any quota on a real repo. Passing
-a local folder instead of a URL skips `git clone` entirely — `clone_repo_node`
-detects it with a plain `os.path.isdir` check.
+Passing a local folder instead of a URL skips `git clone` entirely —
+`clone_repo_node` detects it with a plain `os.path.isdir` check, so this
+also works for analyzing your own uncommitted local projects.
 
-Start with a small repo the first time — indexing and per-file
-summarization both cost API calls, and `max_summarize` in `main.py` caps
-how many files get an LLM-written summary (default 15) to keep a first run
-fast and cheap.
+Both halves of the pipeline are local now:
+- **Embeddings** (`chunk_and_index`) — HuggingFace/sentence-transformers,
+  downloaded once (~130MB) and cached; every run after that is offline.
+- **Chat/generation** (`summarize_modules`, `generate_diagram`, `generate_writeup`)
+  — served by Ollama running on your machine (default `localhost:11434`).
+  Ollama needs to be running, and the model needs to be pulled once with
+  `ollama pull qwen2.5-coder:3b` — after that, no network call happens at all.
 
-**A correction from earlier in this project's own history**: Gemini's free
-tier caps `embed_content` at **100 requests per minute** — a tighter limit
-than the token-based figure mentioned earlier on, and the one that actually
-matters here since chunking produces one request per chunk. `chunk_and_index`
-now retries automatically on a 429 (`src/indexing.py`, `_embed_with_retry`),
-reading the server's suggested wait time and sleeping it out — but if you're
-testing repeatedly against the same repo in a short window (very normal
-while debugging), you can still exhaust the full budget across runs, since
-there's no caching between runs yet (see "Honest limitations" below).
+`max_summarize` in `main.py` still caps how many files get an LLM-written
+summary (default 15) — no longer a cost concern, but it keeps a run on a
+large repo from taking forever on typical laptop hardware.
+
+**A note on this project's own history**: this started on Gemini for both
+embeddings and chat, hit Gemini's free-tier rate limit (100 `embed_content`
+requests/minute) during testing, then moved to local models one piece at a
+time — embeddings first (removing the rate-limit problem at the source),
+then chat (removing the API dependency entirely). Each step's now-unused
+code was deleted rather than left around: the retry-with-backoff logic that
+handled Gemini's 429s, then the `GOOGLE_API_KEY`/`.env` requirement itself.
 
 ### Optional: rendering an actual PNG
 
@@ -119,13 +129,14 @@ that's missing on your machine, `render_mermaid_to_png()` fails gracefully
 and returns `False` rather than crashing the pipeline — the `.mmd` and
 `.md` outputs are unaffected either way.
 
-## Testing without an API key
+## Testing without Ollama running
 
 `test_pipeline.py` runs the real graph — real chunking config, real regex
 import tracing, real LangGraph loop wiring — against a small synthetic repo,
-with only the two Gemini-calling functions mocked out. It specifically
-proves the retry loop fires on an invalid diagram and succeeds on the next
-attempt, and that the deterministic fallback kicks in if every retry fails.
+with only the chat-completion calls mocked out (embeddings are already
+local and need no mocking). It specifically proves the retry loop fires on
+an invalid diagram and succeeds on the next attempt, and that the
+deterministic fallback kicks in if every retry fails.
 
 ```
 python test_pipeline.py
@@ -137,12 +148,12 @@ python test_pipeline.py
 main.py              CLI entry point
 src/state.py          the shared state schema every node reads/writes
 src/parsing.py         regex-based import extraction + entry-point detection (no LLM)
-src/indexing.py         clone + chunk + embed + persist to Chroma (the RAG indexing step)
-src/llm.py               Gemini wrappers, isolated so tests can mock them
+src/indexing.py         clone + chunk + embed locally + persist to Chroma (the RAG indexing step)
+src/llm.py               model wrappers: local embeddings + local Ollama chat, isolated so tests can mock them
 src/render.py              optional Mermaid .mmd -> .png rendering via mermaid-cli
 src/nodes.py                every LangGraph node function
 src/graph.py                 wires nodes.py into the actual StateGraph
 src/qa.py                     free-form RAG Q&A over the persisted vector store
-test_pipeline.py                integration test, no API key required
+test_pipeline.py                integration test, no Ollama/network required
 ```
 
