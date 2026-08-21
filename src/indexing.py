@@ -46,7 +46,11 @@ def list_source_files(repo_root: str) -> list:
         dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
         for filename in filenames:
             full_path = os.path.join(current_dir, filename)               # absolute path on disk
-            rel_path = os.path.relpath(full_path, repo_root)              # path relative to the repo root
+            rel_path = os.path.relpath(full_path, repo_root).replace(os.sep, "/")   # normalize to forward
+                                                                                       # slash on every OS — see
+                                                                                       # the note at the top of
+                                                                                       # parsing.py for why this
+                                                                                       # matters everywhere downstream
             if detect_language(rel_path) is not None:                     # only files we know how to chunk
                 found.append(rel_path)
     return found

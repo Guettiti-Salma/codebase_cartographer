@@ -155,5 +155,37 @@ src/nodes.py                every LangGraph node function
 src/graph.py                 wires nodes.py into the actual StateGraph
 src/qa.py                     free-form RAG Q&A over the persisted vector store
 test_pipeline.py                integration test, no Ollama/network required
+eval/                              evaluation harness — see "Evaluation" section below
 ```
 
+
+
+## Evaluation
+
+`eval/` hand-labels real repos with their true entry points and import
+edges, then scores the pipeline's actual predictions against that ground
+truth — precision, recall, and F1, not "it worked when I tried it."
+
+```
+python -m eval.run_eval          # scores the pipeline against every repo in eval/dataset.py
+python -m eval.test_metrics       # unit tests for the scoring math itself, using synthetic
+                                    # cases with deliberate errors — not just the real repos,
+                                    # which currently happen to score a trivial 100%
+```
+
+Only the deterministic half of the pipeline is scored (entry-point
+detection + import tracing) — there's no ground truth for "the correct
+summary of a file," so the LLM-generated half (summaries, diagram,
+writeup) isn't covered here. Scoring free text against free text needs a
+different approach (an LLM-as-judge rubric, most likely) — a reasonable
+next addition, not yet built.
+
+**Honest caveat about the current 100% scores**: both repos in
+`eval/dataset.py` were also the repos used while finding and fixing the
+original `resolve_import` bugs (src-layout packages, bare package
+imports) earlier in this project. Scoring perfectly on the exact repos
+that shaped the fix is closer to a regression test than independent
+proof the approach generalizes. `eval/dataset.py` has a template and
+instructions for adding more repos — growing this with repos picked
+*without* first running the pipeline on them (true held-out testing) is
+the natural next step, and the more convincing number for an interview.

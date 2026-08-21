@@ -51,7 +51,11 @@ def identify_entry_points_node(state: RepoState) -> dict:
         if is_entry_point(f, state["local_path"])                   # structural check — no LLM call needed
     ]
     if not entries:                                                  # nothing matched a known convention
-        entries = state["all_files"][:1]                             # fall back to "just start somewhere"
+        # sorted(), not raw all_files[:1] — os.walk's file ordering isn't guaranteed to be
+        # the same across operating systems/filesystems, so without sorting, which file
+        # this fallback picks (and therefore every downstream edge) could silently differ
+        # between two machines analyzing the exact same repo
+        entries = sorted(state["all_files"])[:1]                     # fall back to "just start somewhere"
     return {
         "entry_points": entries,
         "frontier": list(entries),                                  # copy — trace_step_node will mutate its own list
